@@ -40,6 +40,17 @@ GEN_FALSE_TRANS(ertn)
 GEN_FALSE_TRANS(dbcl)
 GEN_FALSE_TRANS(idle)
 
+GEN_FALSE_TRANS(safecfgr_w)
+GEN_FALSE_TRANS(safecfgr_d)
+GEN_FALSE_TRANS(safecfgw_w)
+GEN_FALSE_TRANS(safecfgw_d)
+
+GEN_FALSE_TRANS(scfgr_w)
+GEN_FALSE_TRANS(scfgr_d)
+GEN_FALSE_TRANS(scfgw_w)
+GEN_FALSE_TRANS(scfgw_d)
+GEN_FALSE_TRANS(spop)
+
 #else
 
 typedef void (*GenCSRRead)(TCGv dest, TCGv_ptr env);
@@ -495,4 +506,66 @@ static bool trans_idle(DisasContext *ctx, arg_idle *a)
     ctx->base.is_jmp = DISAS_NORETURN;
     return true;
 }
+
+static bool gen_safecfgr(DisasContext *ctx, arg_rr *a,
+                        void (*func)(TCGv, TCGv_ptr, TCGv))
+{
+    TCGv dest = gpr_dst(ctx, a->rd, EXT_NONE);
+    TCGv addr = gpr_src(ctx, a->rj, EXT_NONE);
+
+    if (check_plv(ctx)) {
+        return false;
+    }
+    func(dest, tcg_env, addr);
+    return true;
+}
+
+static bool gen_safecfgw(DisasContext *ctx, arg_rr *a,
+                        void (*func)(TCGv_ptr, TCGv, TCGv))
+{
+    TCGv val = gpr_src(ctx, a->rd, EXT_NONE);
+    TCGv addr = gpr_src(ctx, a->rj, EXT_NONE);
+
+    if (check_plv(ctx)) {
+        return false;
+    }
+    func(tcg_env, addr, val);
+    return true;
+}
+
+static bool trans_spop(DisasContext *ctx, arg_rr *a)
+{
+    if (check_plv(ctx)) {
+        return false;
+    }
+    
+    /* is a safepop */
+    TCGv top = tcg_temp_new();
+    tcg_gen_ld32u_tl(top, tcg_env,
+            offsetof(CPULoongArchState, ssbuf_top));
+    tcg_gen_addi_tl(top, top, 8);
+    tcg_gen_st32_tl(top, tcg_env,
+            offsetof(CPULoongArchState, ssbuf_top));
+    return true;
+}
+
+TRANS(safecfgr_w, SEC, gen_safecfgr, gen_helper_safecfgr_w)
+TRANS(safecfgr_d, SEC, gen_safecfgr, gen_helper_safecfgr_d)
+TRANS(safecfgw_w, SEC, gen_safecfgw, gen_helper_safecfgw_w)
+TRANS(safecfgw_d, SEC, gen_safecfgw, gen_helper_safecfgw_d)
+TRANS(scfgr_w, SEC, gen_safecfgr, gen_helper_safecfgr_w)
+TRANS(scfgr_d, SEC, gen_safecfgr, gen_helper_safecfgr_d)
+TRANS(scfgw_w, SEC, gen_safecfgw, gen_helper_safecfgw_w)
+TRANS(scfgw_d, SEC, gen_safecfgw, gen_helper_safecfgw_d)
+
+/*
+TRANS(safememr_b, gen_safecfgr, gen_helper_safememr_b)
+TRANS(safememr_h, gen_safecfgr, gen_helper_safememr_h)
+TRANS(safememr_w, gen_safecfgr, gen_helper_safememr_w)
+TRANS(safememr_d, gen_safecfgr, gen_helper_safememr_d)
+TRANS(safememw_b, gen_safecfgw, gen_helper_safememw_b)
+TRANS(safememw_h, gen_safecfgw, gen_helper_safememw_h)
+TRANS(safememw_w, gen_safecfgw, gen_helper_safememw_w)
+TRANS(safememw_d, gen_safecfgw, gen_helper_safememw_d)
+*/
 #endif

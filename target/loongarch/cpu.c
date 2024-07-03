@@ -69,6 +69,9 @@ static const struct TypeExcp excp_names[] = {
     {EXCCODE_FPE, "Floating Point Exception"},
     {EXCCODE_DBP, "Debug breakpoint"},
     {EXCCODE_BCE, "Bound Check Exception"},
+    {EXCCODE_SSOVF, "Shadow Stack Buffer Overflow"},
+    {EXCCODE_SSUDF, "Shadow Stack Buffer Underflow"},
+    {EXCCODE_SSBAD, "Shadow Stack Buffer mismatch"},
     {EXCCODE_SXD, "128 bit vector instructions Disable exception"},
     {EXCCODE_ASXD, "256 bit vector instructions Disable exception"},
     {EXCP_HLT, "EXCP_HLT"},
@@ -217,6 +220,11 @@ static void loongarch_cpu_do_interrupt(CPUState *cs)
     case EXCCODE_PNR:
     case EXCCODE_PNX:
     case EXCCODE_PPI:
+    case EXCCODE_SSBAD:
+    case EXCCODE_SSOVF:
+    case EXCCODE_SSUDF:
+    case EXCCODE_SINST:
+    case EXCCODE_SDATA:
         cause = cs->exception_index;
         break;
     default:
@@ -554,6 +562,12 @@ static void loongarch_cpu_reset_hold(Object *obj)
     if (kvm_enabled()) {
         kvm_arch_reset_vcpu(env);
     }
+
+    /* initialize shadow stack data */
+    env->ss_en = 0;
+    env->ssbuf_base = 0;
+    env->ssbuf_top = SSBUF_SIZE;
+    memset(env->ssbuf, 0, SSBUF_SIZE);
 #endif
 
 #ifdef CONFIG_TCG
