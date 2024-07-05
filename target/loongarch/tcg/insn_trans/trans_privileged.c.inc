@@ -198,6 +198,87 @@ static bool check_csr_flags(DisasContext *ctx, const CSRInfo *csr, bool write)
     return true;
 }
 
+void handle_shadow_stack(DisasContext *ctx, TCGv dest, TCGv src1, int is_ret)
+{
+    TCGv tmp = tcg_temp_new();
+    TCGv impctl1 = tcg_temp_new();
+    TCGv top = tcg_temp_new();
+    const CSRInfo *csr;
+    TCGLabel *end = gen_new_label();
+
+    csr = get_csr(LOONGARCH_CSR_IMPCTL1);
+    tcg_gen_ld_tl(impctl1, tcg_env, csr->offset);
+    tcg_gen_movi_tl(tmp, 0x1 << 13);
+    tcg_gen_and_tl(tmp, impctl1, tmp);
+    //is shadow stack enabled?
+    tcg_gen_brcond_tl(TCG_COND_EQ, tmp, ctx->zero, end);
+
+    tcg_gen_ld32u_tl(top, tcg_env,
+            offsetof(CPULoongArchState, ssbuf_top));
+
+    if (is_ret) {
+        TCGLabel *l1 = gen_new_label();
+        TCGLabel *l2 = gen_new_label();
+
+        //is shadow stack empty? top >= size means empty
+        tcg_gen_movi_tl(tmp, SSBUF_SIZE);
+        tcg_gen_brcond_tl(TCG_COND_GE, top, tmp, l1);
+
+        // not empty, pop shadow stack and check
+        // load current entry from safecfg addr 0xff800 + top
+        tcg_gen_movi_tl(tmp, 0xff800);
+        tcg_gen_add_tl(tmp, tmp, top);
+        gen_helper_safecfgr_d(tmp, tcg_env, tmp);
+
+        // ss entry val equal to ra?
+        tcg_gen_brcond_tl(TCG_COND_EQ, src1, tmp, l2);
+
+        generate_exception(ctx, EXCCODE_SSBAD);
+
+        gen_set_label(l1);
+        //stack empty, raise exception
+        generate_exception(ctx, EXCCODE_SSUDF);
+
+        gen_set_label(l2);
+        // succeed. top = top + 8
+        tcg_gen_ld32u_tl(top, tcg_env,
+            offsetof(CPULoongArchState, ssbuf_top));
+        tcg_gen_addi_tl(top, top, 8);
+        tcg_gen_st32_tl(top, tcg_env,
+                offsetof(CPULoongArchState, ssbuf_top));
+    } else {
+        TCGLabel *l1 = gen_new_label();
+
+        tcg_gen_movi_tl(tmp, SSBUF_SIZE);
+
+        //is shadow stack full? top <= zero means full
+        tcg_gen_brcond_tl(TCG_COND_LE, top, ctx->zero, l1);
+
+        // save current ra
+        tcg_gen_addi_tl(top, top, -8);
+        tcg_gen_movi_tl(tmp, 0xff800);
+        tcg_gen_add_tl(tmp, tmp, top);
+        gen_helper_safecfgw_d(tcg_env, tmp, dest);
+
+        // helper might destroy top, reload
+        tcg_gen_ld32u_tl(top, tcg_env,
+            offsetof(CPULoongArchState, ssbuf_top));
+        tcg_gen_addi_tl(top, top, -8);
+        tcg_gen_st32_tl(top, tcg_env,
+                offsetof(CPULoongArchState, ssbuf_top));
+
+        //goto end
+        tcg_gen_brcond_tl(TCG_COND_EQ, top, top, end);
+
+        gen_set_label(l1);
+
+        //stack full, raise overflow exception
+        generate_exception(ctx, EXCCODE_SSOVF);
+    }
+
+    gen_set_label(end);
+}
+
 static bool trans_csrrd(DisasContext *ctx, arg_csrrd *a)
 {
     TCGv dest;
