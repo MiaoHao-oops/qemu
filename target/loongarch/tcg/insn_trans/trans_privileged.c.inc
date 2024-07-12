@@ -235,9 +235,15 @@ void handle_shadow_stack(DisasContext *ctx, TCGv dest, TCGv src1, int is_ret)
 
         generate_exception(ctx, EXCCODE_SSBAD);
 
+        //goto end
+        tcg_gen_brcond_tl(TCG_COND_EQ, top, top, end);
+
         gen_set_label(l1);
         //stack empty, raise exception
         generate_exception(ctx, EXCCODE_SSUDF);
+
+        //goto end
+        tcg_gen_brcond_tl(TCG_COND_EQ, top, top, end);
 
         gen_set_label(l2);
         // succeed. top = top + 8
